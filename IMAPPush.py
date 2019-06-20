@@ -52,7 +52,7 @@ Copyright (c) 2010 -- Chris Kirkham
 
 __version__ = '0.1'
 __author__  = 'Chris Kirkham'
-__URL__	    = 'http://hmmtheresanidea.blogspot.com'
+__URL__		= 'http://hmmtheresanidea.blogspot.com'
 __credits__ = """
 	* Tim's Weblog - http://blog.hokkertjes.nl/2009/03/11/python-imap-idle-with-imaplib2/ - 
 	this was a great help. It got me on the right track. It taught me the Event() stuff as 
@@ -65,7 +65,11 @@ __license__ = "MIT/X11"
 __version__ = "1.0.1"
 
 
-import threading, imaplib2, os, sys, getpass, imaplib, email
+import threading, imaplib2, os, sys, getpass, imaplib, email, smtplib
+from email.mime.text import MIMEText
+from email.MIMEMultipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import Encoders
 
 
 if not len(sys.argv) >= 2:
@@ -75,7 +79,7 @@ if not len(sys.argv) >= 2:
 	print ' '
 	print 'Alternatively, you can just pass your username and enter your password hidden:'
 	print ' '
-	print 'IMAPPush.py USERNAME                    (then you\'re prompted for a password)'
+	print 'IMAPPush.py USERNAME					(then you\'re prompted for a password)'
 	print ' '
 	sys.exit(1)
 
@@ -107,20 +111,20 @@ The worker class for the thread. Letting a thread wait for the server to send so
 main thread (if that's what you call it??) to be used for other stuff -- waiting for UI, for example.
 """
 class Idler(threading.Thread):
-		
-	imap = imaplib2.IMAP4_SSL("imap.gmail.com") # can be changed to another server if needed
 	
+	imap = imaplib2.IMAP4_SSL("imap.gmail.com") # can be changed to another server if needed
+
 	stopWaitingEvent = threading.Event()
 	#Now, this stopWaitingEvent thing -- it really does make the whole thing work. Basically, 
 	#it holds a boolean value which is set and cleared using, oddly enough, the methods set() and
 	#clear(). But, the good thing about it is that it has another method, wait(), which holds 
 	#execution until it has been set(). I cannot thank threading.Event() enough, I really couldn't
 	#have done it without you!
-	
+
 	knownAboutMail = [] # will be a list of IDs of messages in the inbox
 	killNow = False # stops execution of thread to allow propper closing of conns.
-	
-	
+
+
 	"""
 	Initialise (sorry, I'm from the UK) everything to get ready for PUSHed mail.
 	"""
@@ -151,8 +155,8 @@ class Idler(threading.Thread):
 			sys.exit(1)
 			
 		debugMsg('__init__() exited')
-		
-		
+
+
 	"""
 	The method invoked when the thread id start()ed. Enter a loop executing waitForServer()
 	untill kill()ed. waitForServer() can, and should, be continuously executed to be alerted
@@ -290,20 +294,18 @@ class Idler(threading.Thread):
 						
 				if data[0] == '': # no IDs, so it was a timeout (but no notified but UNSEEN mail)
 					self.timeout = True
-		
+
 			#now there has either been a timeout or a new message -- Do something...
 			if self.newMail:
 				debugMsg('INFO: New Mail Received')
 				self.showNewMailMessages()
 
 
-							
 			elif self.timeout:
 				debugMsg('INFO: A Timeout Occurred')
 			
 		debugMsg('waitForServer() exited')
-			
-			
+
 
 """
 Simple procedure to output debug messages nicely.
@@ -335,12 +337,10 @@ def lastMessageRecieved(YourGmailUsername, YourGmailPassword):
 				typ, data = mail.store(messages[-1],'-FLAGS','\\Seen') # TO let the message like unread, because we are only listing... we are not viewing the details
 				original = email.message_from_string(response_part[1].decode("utf-8",'ignore'))
 				print ('New email... FROM: ' + original['From'] + ' - SUBJECT:' + original['Subject'])
-			
+
 	mail.close()
 	mail.logout()
 	print('Type \'q\' followed by [ENTER] to quit or type \'u\' followed by [ENTER] to update list of unreaded mails (without spam or social mails): ')
-
-
 
 
 """
@@ -365,19 +365,51 @@ def unreadList(YourGmailUsername, YourGmailPassword):
 				messages.append(message)
 
 
-        #print (messages)
+		#print (messages)
 		print ('Processing unread mails...')
-        for num in messages :
-            n=n+1
-            typ, data = mail.fetch(num,'(RFC822)')
-            for response_part in data:
-                if isinstance(response_part, tuple):
-                    typ, data = mail.store(num,'-FLAGS','\\Seen') # TO let the message like unread, because we are only listing... we are not viewing the details
-                    original = email.message_from_string(response_part[1].decode("utf-8",'ignore'))
-                    print ('[' + str(n) + '] FROM: ' + original['From'] + ' - SUBJECT:' + original['Subject'])
+		for num in messages :
+			n=n+1
+			typ, data = mail.fetch(num,'(RFC822)')
+			for response_part in data:
+				if isinstance(response_part, tuple):
+					typ, data = mail.store(num,'-FLAGS','\\Seen') # TO let the message like unread, because we are only listing... we are not viewing the details
+					original = email.message_from_string(response_part[1].decode("utf-8",'ignore'))
+					print ('[' + str(n) + '] FROM: ' + original['From'] + ' - SUBJECT:' + original['Subject'])
 	mail.close()
 	mail.logout()
-	
+
+
+"""
+Function to send a mail
+"""
+def sendMail(content, to, subject, file_names, YourGmailUsername, YourGmailPassword):
+	smtp_ssl_host = 'smtp.gmail.com'
+	smtp_ssl_port = 465
+	username = YourGmailUsername
+	password = YourGmailPassword
+	msg = MIMEMultipart()
+	msg['Subject'] = subject
+	msg['From'] = YourGmailUsername
+	msg['To'] = to
+	body = MIMEText(content)
+	msg.attach(body)
+	server = smtplib.SMTP_SSL(smtp_ssl_host, smtp_ssl_port)
+	server.login(username, password)
+	for file in file_names:
+		#left validate every file here
+		part = MIMEBase('application', "octet-stream")
+		part.set_payload( open(file,"rb").read() )
+		Encoders.encode_base64(part)
+		part.add_header('Content-Disposition', 'attachment; filename="%s"'
+					   % os.path.basename(file))
+		msg.attach(part)
+	try:
+		server.sendmail(YourGmailUsername, to, msg.as_string())
+		server.quit()
+		return 1
+	except:
+		server.quit()
+		return 0
 
 
 """
@@ -394,10 +426,24 @@ def main():
 	print '* Waiting for mail...'
 	q = ''
 	while not q == 'q':
-		q = raw_input('Type \'q\' followed by [ENTER] to quit or type \'u\' followed by [ENTER] to update list of unreaded mails (without spam or social mails): ')
+		q = raw_input('Type \'q\' followed by [ENTER] to quit or type \'u\' followed by [ENTER] to update list of unreaded mails (without spam or social mails) or  type \'s\' followed by [ENTER] to send a mail:')
 		if(q == 'u'):	
 			unreadList(YourGmailUsername, YourGmailPassword)
-		
+		elif(q == 's'):
+			#left validate entries here
+			to = raw_input('Text the mails, following as \',\', example (example1@yopmail.com,example2@yopmail.com)\n')
+			subject = raw_input('Enter the subject\n')
+			content = raw_input('Put the content of the message here:\n')
+			file_names =[]
+			file = raw_input('Put the path of file to attach (if you dont want add more files only text \'q\')\n')
+			while(file != 'q'):
+				file_names.append(file)
+				file = raw_input('Put the path of file to attach (if you dont want add more files only text \'q\')\n')
+			if sendMail(content, to, subject, file_names, YourGmailUsername, YourGmailPassword):
+				print 'Email send'
+			else:
+				print 'Email not send'
+
 	idler.kill()	
 	idler.imap.CLOSE()
 	idler.imap.LOGOUT()
@@ -410,4 +456,3 @@ if __name__ == '__main__': # then this script is being run on its own, i.e. not 
 else:
 	print 'I don\'t think you ment to import this'
 	sys.exit(1)
-	
